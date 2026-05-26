@@ -1,209 +1,151 @@
-<div align="center">
-# 📄 PDF-to-CBT Generator
-**Drop a question paper. Get an interactive exam.**
-Convert competitive exam PDFs — JEE, NEET, UPSC, GRE, and more — into fully interactive Computer-Based Tests using AI-powered parsing, OCR fallbacks, and real-time math rendering.
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
-[![Vite](https://img.shields.io/badge/Vite-5-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
-[![Groq](https://img.shields.io/badge/Groq-LLaMA_3.3_70B-F55036?style=flat-square)](https://console.groq.com)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
-</div>
----
-## How it works
+```markdown
+# PDF-to-CBT Generator (Full Stack)
 
-┌──────────────┐ ┌─────────────────────────────────────┐ ┌────────────────────┐
-│ Upload PDF │ ──► │ FastAPI Backend │ ──► │ React Frontend │
-│ (≤ 20 MB) │ │ │ │ │
-└──────────────┘ │ 1. pdfplumber — vector text │ │ • Live timer │
-│ 2. Tesseract OCR — scanned pages │ │ • KaTeX math │
-│ 3. Boundary-aware chunker │ │ • Question palette│
-│ 4. Groq LLaMA-3.3 — JSON parser │ │ • Subject filters │
-│ 5. Diagram extractor + mapper │ │ • Results + grading│
-└─────────────────────────────────────┘ └────────────────────┘
+An automated, full-stack pipeline that converts flat, competitive exam PDF question papers (such as JEE, NEET, UPSC, and GRE) into interactive Computer-Based Tests (CBT). Powered by high-accuracy Python extraction utilities, custom boundary-aware text chunking algorithms, and intelligent LLM JSON parsers.
 
 ---
-## Features
-### 🔍 PDF Engine & OCR
-| Capability | Detail |
-|---|---|
-| Vector text extraction | `pdfplumber` reads native text layers with page-level warnings for math and images |
-| Scanned PDF fallback | Pages converted to 300 DPI via `pdf2image` / Poppler, then OCR'd with `pytesseract` |
-| Math detection | Flags pages containing `\frac`, `\sqrt`, `∫`, `∑`, and Greek characters |
-| Max file size | 20 MB |
-### 🧠 LLM Parsing Pipeline
-| Capability | Detail |
-|---|---|
-| Boundary-aware chunker | Splits at question boundaries using `r'(?m)^(?=\s*\d{1,2}\.\s+\S)'` — no sentence fragmentation |
-| Sub-chunk retry | Empty results trigger automatic bisection at the nearest question index and retry |
-| Deduplication | 80-character stem hash fingerprints remove overlapping questions across chunks |
-| Rate-limit handling | Parses Groq's `retry-after` header and waits the exact required duration |
-| Mock fallback | Returns sample questions when no API key is set — frontend dev works without Groq |
-### 🖼 Diagram Extraction
-| Capability | Detail |
-|---|---|
-| Bounding-box extraction | Pulls `x0`, `top`, `x1`, `bottom` from PDF object tables |
-| Noise filtering | Skips decorative elements smaller than 50 × 50 px |
-| Heuristic page mapper | Matches question stem text to page to assign the right diagram |
-| Inline embedding | Images base64-encoded as `image/png` — no file storage needed |
-| Manual override | Upload a replacement diagram for any question directly in the test UI |
-### ⚡ Interactive Frontend
-| Capability | Detail |
-|---|---|
-| Three-phase flow | Upload → Test → Results orchestrated by `App.jsx` |
-| Smart timer | Reads duration from PDF headers; defaults to 3 min/question, max 180 min |
-| Warning states | Amber pulse below 5 min · Red critical pulse below 60 s · Auto-submit on expiry |
-| KaTeX math | Lazily pre-compiles `$$...$$`, `$...$`, `\(...\)`, `\[...\]` — no SSR flicker |
-| Subject filter tabs | Colour-coded tabs per subject — click to filter palette and jump to first question |
-| Per-subject progress | Live `answered/total` count per subject in the palette |
-| Answer key import | Upload a separate answer-key PDF or override answers manually post-submission |
-### 📊 Grading
 
-Correct answer → +4 marks
-Wrong answer → −1 mark
-Skipped / cleared → 0 marks
+## 🚀 Key System Features
 
-Clicking a selected option again deselects it (reverts to 0 marks).
----
-## Tech Stack
+### 🛠 Custom PDF Engine & Fallbacks
+* **Dual-Layer Extraction**: Uses `pdfplumber` to extract native vector text layers. Detects structural warnings such as embedded math blocks and unextracted diagram coordinates dynamically.
+* **Tesseract OCR Fallbacks**: If vector text density is insufficient (e.g., heavily scanned image-only PDFs), the system seamlessly pipes high-resolution page buffers (`300 DPI` via `pdf2image` and `poppler`) through `pytesseract` optical character recognition with pre-compiled alphanumeric normalization.
 
-Backend Python 3.11 · FastAPI · Uvicorn
-LLM Groq Cloud — llama-3.3-70b-versatile
-PDF Processing pdfplumber · pdf2image · pytesseract · Poppler
-Frontend React 18 · Vite 5 · Tailwind CSS 3
-Math Rendering KaTeX
-Containers Docker · Docker Compose · Nginx
+### 🧠 Intelligent Context Chunking & Extraction
+* **Layout-Aware Token Chunking**: Implements a native regex sliding-window chunker (`split_into_question_chunks`) configured to detect standalone question bounds (`r'(?m)^(?=\s*\d{1,2}\.\s+\S)'`). Prevents sentence fragmentation and optimizes context placement for deep LLM reasoning.
+* **Deterministic Sub-Chunk Retry Logic**: Automatically catches rate limits or output truncations. Under-performing JSON buffers are bisected at localized question indices and re-sent through a targeted retry loop.
+* **Cross-Question Token Deduplication**: Matches extracted strings using a localized stem hash (`80-char index`) to remove duplicate or overlapping chunks before parsing back to the client.
+
+### 🖼 Coordinate-Based Multiple Diagram Extraction
+* **Spatial Intersection Bounds**: Extracts absolute rectangular bounding boxes (`x0`, `top`, `x1`, `bottom`) for individual geometric assets or formulas directly from PDF object tables. Ignores cosmetic lines or decorative elements smaller than 50px.
+* **Heuristic Page-Mapping Engine**: Dynamically calculates structural matches between parsed text tokens and image locations. Couples detached base64 diagram strings back to their corresponding interactive questions.
+
+### ⏱ Advanced Interactive Frontend Runtime
+* **Smart Exam Detection**: Automatically scans exam headings for temporal indicators (e.g., `3 Hours`, `Duration: 180 Mins`) using regular expressions, dynamically defaulting to a localized allocation format (`3 minutes per question`) if missing.
+* **Visual Warning States**: Employs an exact countdown component featuring custom ticking hooks and multi-tier alerting milestones (amber animations below 5 mins, critical pulsing below 60 seconds) with automated auto-submit containment.
+* **Isolated KaTeX Component**: Implements a lazy-loaded KaTeX parsing architecture that avoids SSR flickering. Pre-compiles inline math block fragments (`$$...$$`, `$..$`, `\(..\)`, `\[..\]`) to string variables for ultra-fluid viewport painting.
 
 ---
-## Project Structure
 
+## 📂 System Architecture
+
+```text
 pdf-to-cbt/
 ├── backend/
-│ ├── main.py # FastAPI — extraction, OCR, chunking, Groq, all routes
-│ ├── requirements.txt # Python dependencies
-│ └── Dockerfile # Debian slim + Tesseract + Poppler
-│
+│   ├── main.py              # FastAPI app, PDF/OCR extraction engine, & Groq client integration
+│   ├── Dockerfile           # Debian slim build containing Tesseract-OCR binary layers & Poppler utils
+│   └── requirements.txt     # Python dependencies (FastAPI, Groq, pdfplumber, pytesseract, etc.)
 ├── frontend/
-│ ├── index.html # Root HTML with KaTeX stylesheet link
-│ ├── vite.config.js # Port config + /api reverse proxy to :8000
-│ ├── tailwind.config.js # Content path config
-│ ├── postcss.config.js # PostCSS setup
-│ ├── package.json # Dependencies and scripts
-│ └── src/
-│ ├── App.jsx # Phase orchestrator (upload / test / results)
-│ ├── main.jsx # React entry point
-│ ├── index.css # Tailwind directives + global styles
-│ └── components/
-│ ├── UploadZone.jsx # Drag-and-drop uploader with network states
-│ ├── CBTInterface.jsx # Test viewport — questions, options, navigation
-│ ├── QuestionPalette.jsx # Sidebar with subject filter tabs + status tracking
-│ ├── Timer.jsx # Countdown with amber / red warning thresholds
-│ ├── MathText.jsx # Lazy KaTeX renderer for inline + display math
-│ └── ResultsDashboard.jsx # Score breakdown + answer key import / override
-│
-└── docker-compose.yml # Full-stack orchestration with env var passthrough
+│   ├── src/
+│   │   ├── App.jsx          # Phase orchestrator (Upload → Test View → Analytical Dashboard)
+│   │   ├── main.jsx         # UI initialization mount point
+│   │   ├── index.css        # Core style layer with Tailwind directives & vector font sizing
+│   │   └── components/
+│   │       ├── UploadZone.jsx       # Drag-and-drop landing page with network processing states
+│   │       ├── CBTInterface.jsx     # Active assessment viewport containing option controls
+│   │       ├── QuestionPalette.jsx  # Side navigation component tracking state distributions
+│   │       ├── Timer.jsx            # Countdown module featuring state warning thresholds
+│   │       ├── MathText.jsx         # Custom pre-loading abstract math rendering engine (KaTeX)
+│   │       └── ResultsDashboard.jsx # Analytics view with custom answer key override flows
+│   ├── package.json         # Build definitions and node modules manifests
+│   ├── vite.config.js       # Bundler setup specifying reverse API loop configuration
+│   ├── tailwind.config.js   # Style compiler path targeting criteria
+│   ├── postcss.config.js    # Style processing configuration
+│   ├── index.html           # Document root script injector containing KaTeX style sheets
+│   └── Dockerfile           # Optimized multi-stage build running Node compilation inside Nginx Alpine
+└── docker-compose.yml       # Production-ready stack manager exposing cross-container environment variables
+
+```
 
 ---
-## API Reference
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/upload` | Upload exam PDF → returns questions, warnings, duration |
-| `POST` | `/api/parse-answer-key` | Upload answer-key PDF → returns `{question_id: answer_index}` |
-| `PATCH` | `/api/questions/answer-key` | Apply manual answer key → validates and returns confirmed map |
-| `POST` | `/api/question/{id}/image` | Upload replacement diagram for a specific question |
-| `GET` | `/health` | Health check |
+
+## ⚙️ Core Configuration Variables
+
+The system relies on specific environment parameters for its data parsing and schema normalization layers:
+
+| Key Name | Location | Format / Values | Operational Scope |
+| --- | --- | --- | --- |
+| `GROQ_API_KEY` | `.env` (Root) | `gsk_...` | Authorizes LLM calls to Groq Cloud endpoint. |
+| `LLM_MODEL` | `backend/main.py` | `llama-3.3-70b-versatile` | Orchestrates strict JSON schema code generation. |
+| `POPPLER_PATH` | Container / OS | `/usr/bin` (or custom path) | Converts binary vector paths into high-density raster files. |
+| `CORS Allow Origin` | `backend/main.py` | `http://localhost:3000` | Secures cross-origin requests from the client. |
+
 ---
-## Configuration
-| Variable | Where | Description |
-|---|---|---|
-| `GROQ_API_KEY` | `.env` at project root | **Required.** Get a free key at [console.groq.com](https://console.groq.com) |
-| `LLM_MODEL` | `backend/main.py` line 41 | Model string. Default: `llama-3.3-70b-versatile` |
-| `POPPLER_PATH` | OS environment | Override Poppler binary path. Auto-detected if on `$PATH` |
-| `CHUNK_SIZE` | `backend/main.py` | Max chars per LLM chunk. Default: `3500` |
-| `CHUNK_OVERLAP` | `backend/main.py` | Overlap between chunks. Default: `400` |
-| `MAX_TEXT` | `backend/main.py` | Total text cap sent to LLM. Default: `40000` |
----
-## Setup
-### Prerequisites
-Create a `.env` file in the project root:
+
+## 🚀 Step-by-Step Installation
+
+Ensure you have your environment credentials set up beforehand. Create a `.env` file in your root folder:
+
 ```bash
-GROQ_API_KEY=gsk_your_key_here
+GROQ_API_KEY=your_actual_groq_api_key_here
 
-Option A — Docker Compose ✦ Recommended
-No manual dependency installation. One command builds and starts everything.
+```
 
+### Method A: Docker Compose (Recommended Production Setup)
+
+Run the entire architecture locally inside optimized isolated system containers with a single command:
+
+```bash
 docker-compose up --build
 
-Service	URL
-React frontend	http://localhost:3000
-FastAPI backend	http://localhost:8000
-/api/* requests from the frontend are automatically proxied to the backend.
+```
 
-Option B — Manual Setup
-1. Install system binaries
-Both must be available on your system PATH.
+* The React client will spin up at `http://localhost:3000`
+* The FastAPI server will map to `http://localhost:8000`
+* Reverse proxies route internal paths (`/api/*`) flawlessly between endpoints.
 
-<details> <summary><strong>macOS</strong></summary>
-brew install tesseract poppler
+---
 
-</details> <details> <summary><strong>Ubuntu / Debian</strong></summary>
-sudo apt install tesseract-ocr poppler-utils
+### Method B: Manual Native Development Setup
 
-</details> <details> <summary><strong>Windows</strong></summary>
-Tesseract: UB Mannheim installer
-Poppler: oschwartz10612/poppler-windows
-Add both install directories to your system PATH.
+#### 1. System Prerequisites (Mandatory)
 
-</details>
-2. Backend
+Because this application relies on low-level binary compilers to perform advanced image text parsing, you must install these utilities to your native system environment variables path:
+
+* **Tesseract OCR Engine**: Install the core package and make sure `tesseract` is accessible via your terminal.
+* **Poppler Utilities**: Required for PDF page conversion. Verify that binary commands like `pdftoppm` are fully recognized by your terminal path variables.
+
+#### 2. Backend Setup
+
+```cmd
 cd backend
 python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+call venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 
-3. Frontend
+```
+
+#### 3. Frontend Setup
+
+```cmd
 cd frontend
 npm install
 npm run dev
 
-Open http://localhost:3000 in your browser.
+```
 
-Usage
-1. Upload     Drop an exam PDF (max 20 MB) onto the upload zone.
-2. Test       Answer questions using the palette sidebar.
-              Click an option to select · click again to deselect.
-              Use subject filter tabs to jump between sections.
-3. Submit     Click Submit or let the timer auto-submit on expiry.
-4. Results    Review your score, subject breakdown, and per-question detail.
-              Import a separate answer-key PDF or set answers manually
-              for real-time score recalculation.
+Open `http://localhost:3000` in your web browser.
 
-Edge Cases
-<details> <summary><strong>Math / LaTeX equations</strong></summary>
-PDFs often bake equations into vector paths with no extractable text. The backend detects math-bearing pages and the frontend renders all delimited expressions through KaTeX instead of displaying raw strings.
+---
 
-</details> <details> <summary><strong>Scanned / image-only PDFs</strong></summary>
-When pdfplumber returns fewer than 100 characters, the system automatically escalates to Tesseract OCR at 300 DPI. Quality varies with scan resolution and print clarity.
+## 📊 Evaluation Mechanics
 
-</details> <details> <summary><strong>Missing answer keys</strong></summary>
-When no answer key is found, correct_answer_index is set to -1 for all questions. The Results Dashboard offers two recovery paths: automated extraction via /api/parse-answer-key or manual per-question override with live score recalculation.
+### Marking Grid Matrix
 
-</details> <details> <summary><strong>"Match the Following" questions</strong></summary>
-The LLM prompt explicitly handles column-format questions. Both Column I and Column II are embedded in question_text as a structured block so the full table is preserved and displayed correctly.
+The grading metrics follow strict standard formats utilized across advanced scientific entrance examinations:
 
-</details> <details> <summary><strong>Diagram-only answer options</strong></summary>
-When answer options are chemical structures or diagrams that OCR cannot read, the backend sets has_image: true and uses "illegible (structure/diagram)" as placeholder text, prompting the user to refer to the original paper.
+* **Correct Submission**: `+4 Marks`
+* **Incorrect Submission**: `-1 Negative Mark`
+* **Skipped/Cleared Field**: `0 Marks`
 
-</details>
-Development Notes
-Vite's /api proxy to :8000 means no CORS changes are needed during local development.
-The CHUNK_SIZE, CHUNK_OVERLAP, and MAX_TEXT constants in backend/main.py can be tuned to balance cost, latency, and parsing accuracy.
-Setting GROQ_API_KEY to an empty string activates the mock question set — useful for frontend work without consuming API quota.
-Roadmap
- Subject-filter tabs in the question palette
- Local test history via browser localStorage
- Multi-correct (MSQ) question type support
- Export results as a downloadable PDF report
- Dark / light theme toggle
+### Advanced Post-Exam Answer Key Flow
+
+By default, if an exam document does not containerize explicit metadata mapping solutions, the backend extracts schemas using an index of `-1` (marked as *Unknown Evaluation Structure*). To resolve this gracefully, the platform provides a dual-interface processing panel inside the results view:
+
+1. **Automated End-Block OCR Scanning**: Click **"Import Answer Key"** to pass the same or an external document tracking sheet into an isolated endpoint (`/api/parse-answer-key`). This uses a specialized prompt pattern (`ANSWER_KEY_PROMPT`) to automatically isolate matrix structures matching standard keys (e.g., `1-A, 2-B` tables).
+2. **Dynamic Manual Overrides**: Provides interactive viewport blocks directly inside the app to manually configure answer parameters, forcing real-time client score recalculations across all completed fields.
+
+```
+
+```
