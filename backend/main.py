@@ -18,6 +18,8 @@ from typing import List, Optional
 import pytesseract
 from pdf2image import convert_from_path
 from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
+
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 load_dotenv()  # also try cwd
@@ -26,7 +28,11 @@ app = FastAPI(title="CBT Generator API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://pdf-to-cbt-frontend.onrender.com",  # add this
+        "*"  # or just use this for now
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
