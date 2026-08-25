@@ -19,6 +19,7 @@ import pytesseract
 from pdf2image import convert_from_path
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+from concurrent.futures import ThreadPoolExecutor
 
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
@@ -30,8 +31,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://pdf-to-cbt-frontend.onrender.com",  # add this
-        "*"  # or just use this for now
+        "https://pdf-to-cbt-frontend.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -50,7 +50,7 @@ POPPLER_PATH = _poppler_env if _poppler_env else None
 
 CHUNK_SIZE    = 3500   # reduced so chunks fit LLM context better
 CHUNK_OVERLAP = 400
-MAX_TEXT      = 40000
+MAX_TEXT      = 100000
 RETRY_WAIT    = 65
 MAX_RETRIES   = 3
 
@@ -114,12 +114,21 @@ def extract_text_from_pdf(file_bytes: bytes) -> tuple[str, List[str]]:
 
         try:
             images = convert_from_path(tmp_path, dpi=300, poppler_path=POPPLER_PATH)
-            for i, image in enumerate(images):
-                page_text = pytesseract.image_to_string(image)
+            
+            def process_image(i_img):
+                i, img = i_img
+                page_text = pytesseract.image_to_string(img)
                 page_text = re.sub(r'\[p?([ABCDabcd])\]', r'(\1)', page_text)
                 page_text = re.sub(r'\[([ABCDabcd])\)', r'(\1)', page_text)
                 print(f"OCR Page {i+1} length: {len(page_text)}")
-                ocr_pages.append(f"--- Page {i+1} ---\n{page_text}")
+                return i, f"--- Page {i+1} ---\n{page_text}"
+
+            with ThreadPoolExecutor() as executor:
+                results = list(executor.map(process_image, enumerate(images)))
+            
+            results.sort(key=lambda x: x[0])
+            ocr_pages = [text for _, text in results]
+            
             combined = "\n\n".join(ocr_pages)
         finally:
             os.unlink(tmp_path)
@@ -422,7 +431,8 @@ def call_llm_api(raw_text: str) -> list[dict]:
     print(f"Total chunks to process: {len(chunks)}")
     all_questions = []
 
-    for idx, chunk in enumerate(chunks):
+    def process_and_retry(idx_chunk):
+        idx, chunk = idx_chunk
         print(f"Processing chunk {idx+1}/{len(chunks)} (len={len(chunk)})...")
         questions = _process_chunk(client, chunk, idx + 1, len(chunks))
 
@@ -437,8 +447,14 @@ def call_llm_api(raw_text: str) -> list[dict]:
                 if sub.strip():
                     sub_qs = _process_chunk(client, sub, f"{idx+1}.{sub_idx+1}", "sub")
                     questions.extend(sub_qs)
+        return idx, questions
 
-        all_questions.extend(questions)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = list(executor.map(process_and_retry, enumerate(chunks)))
+    
+    results.sort(key=lambda x: x[0])
+    for _, qs in results:
+        all_questions.extend(qs)
 
     # Dedup by 80-char stem
     seen = set()
@@ -521,6 +537,9 @@ async def upload_pdf(file: UploadFile = File(...)):
     page_images = extract_images_from_pdf(contents)
     print(f"Extracted image sets from {len(page_images)} page(s)")
 
+    if len(raw_text) > MAX_TEXT:
+        warnings.append(f"PDF too large. Only the first {MAX_TEXT} characters were processed.")
+
     try:
         raw_questions = call_llm_api(raw_text)
     except json.JSONDecodeError:
@@ -569,7 +588,10 @@ async def parse_answer_key(file: UploadFile = File(...)):
 
     contents = await file.read()
     raw_text, _ = extract_text_from_pdf(contents)
-    tail = raw_text[int(len(raw_text) * 0.6):]
+    if len(raw_text) < 4000:
+        tail = raw_text
+    else:
+        tail = raw_text[int(len(raw_text) * 0.6):]
 
     if not LLM_API_KEY:
         raise HTTPException(status_code=503, detail="GROQ_API_KEY not configured.")

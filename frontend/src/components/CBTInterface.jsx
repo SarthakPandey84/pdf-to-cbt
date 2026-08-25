@@ -10,19 +10,47 @@ const MARKS_SKIPPED = 0;
 
 export default function CBTInterface({ questions: initialQuestions, durationMinutes = 180, onSubmit }) {
   const [questions, setQuestions] = useState(initialQuestions);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState({});
-  // Timer: use durationMinutes from backend (detected or fallback)
-  const [timeLeft, setTimeLeft] = useState(durationMinutes * 60);
+
+  const loadState = () => {
+    try {
+      const saved = localStorage.getItem("cbt_session");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.questionsLength === initialQuestions.length) return parsed;
+      }
+    } catch (e) {
+      console.error("Failed to load session", e);
+    }
+    return null;
+  };
+  const savedState = loadState();
+
+  const [currentIndex, setCurrentIndex] = useState(savedState ? savedState.currentIndex : 0);
+  const [answers, setAnswers] = useState(savedState ? savedState.answers : {});
+  const [endTime] = useState(savedState ? savedState.endTime : Date.now() + durationMinutes * 60000);
+  
+  const calculateTimeLeft = () => Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+  const [timeLeft, setTimeLeft] = useState(calculateTimeLeft());
+  
   const [showConfirm, setShowConfirm] = useState(false);
   const fileInputRef = useRef(null);
   const [uploadingFor, setUploadingFor] = useState(null);
 
   useEffect(() => {
-    if (timeLeft <= 0) { handleSubmit(true); return; }
-    const timer = setTimeout(() => setTimeLeft(prev => prev - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [timeLeft]);
+    if (timeLeft <= 0 && calculateTimeLeft() <= 0) { handleSubmit(true); return; }
+    const timer = setInterval(() => {
+      const remaining = calculateTimeLeft();
+      setTimeLeft(remaining);
+      if (remaining <= 0) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [endTime]);
+
+  useEffect(() => {
+    localStorage.setItem("cbt_session", JSON.stringify({
+      questionsLength: questions.length, currentIndex, answers, endTime
+    }));
+  }, [questions.length, currentIndex, answers, endTime]);
 
   const currentQuestion = questions[currentIndex];
 
@@ -35,6 +63,7 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
 
   const handleSubmit = useCallback((autoSubmit = false) => {
     if (!autoSubmit && !showConfirm) { setShowConfirm(true); return; }
+    localStorage.removeItem("cbt_session");
     const results = questions.map((q, i) => {
       const answered = answers[i] !== undefined && answers[i] !== null;
       const correct = answered && answers[i] === q.correct_answer_index;
