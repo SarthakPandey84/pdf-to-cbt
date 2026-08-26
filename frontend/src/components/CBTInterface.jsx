@@ -28,9 +28,16 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
 
   const [currentIndex, setCurrentIndex] = useState(savedState ? savedState.currentIndex : 0);
   const [answers, setAnswers] = useState(savedState ? savedState.answers : {});
-  const [endTime] = useState(savedState ? savedState.endTime : Date.now() + durationMinutes * 60000);
+  const [endTime, setEndTime] = useState(savedState ? savedState.endTime : Date.now() + durationMinutes * 60000);
+  const [pauseStartTime, setPauseStartTime] = useState(null);
   
-  const calculateTimeLeft = () => Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+  const calculateTimeLeft = useCallback(() => {
+    if (pauseStartTime) {
+      return Math.max(0, Math.floor((endTime - pauseStartTime) / 1000));
+    }
+    return Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+  }, [endTime, pauseStartTime]);
+
   const [timeLeft, setTimeLeft] = useState(calculateTimeLeft());
   
   const [showConfirm, setShowConfirm] = useState(false);
@@ -46,7 +53,7 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
       if (remaining <= 0) clearInterval(timer);
     }, 1000);
     return () => clearInterval(timer);
-  }, [endTime]);
+  }, [endTime, pauseStartTime, calculateTimeLeft, handleSubmit, timeLeft]);
 
   useEffect(() => {
     localStorage.setItem("cbt_session", JSON.stringify({
@@ -82,6 +89,14 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
 
   const goTo = (idx) => setCurrentIndex(Math.max(0, Math.min(questions.length - 1, idx)));
 
+  const handleCropperClose = () => {
+    if (pauseStartTime) {
+      setEndTime(prev => prev + (Date.now() - pauseStartTime));
+      setPauseStartTime(null);
+    }
+    setCropperState({ isOpen: false, questionId: null, optionIndex: null });
+  };
+
   const handleCropComplete = (base64Data, mimeType) => {
     const { questionId, optionIndex } = cropperState;
     if (!questionId) return;
@@ -105,10 +120,11 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
       return q;
     }));
     
-    setCropperState({ isOpen: false, questionId: null, optionIndex: null });
+    handleCropperClose();
   };
 
   const triggerDiagramCrop = (questionId, optionIndex = null) => {
+    setPauseStartTime(Date.now());
     setCropperState({ isOpen: true, questionId, optionIndex });
   };
 
@@ -120,7 +136,7 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
       {cropperState.isOpen && (
         <ImageCropperModal
           base64Image={pageImages[currentQuestion.page_number]}
-          onClose={() => setCropperState({ isOpen: false, questionId: null, optionIndex: null })}
+          onClose={handleCropperClose}
           onCropComplete={handleCropComplete}
         />
       )}
