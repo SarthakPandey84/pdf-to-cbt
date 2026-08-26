@@ -45,15 +45,6 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
   // { isOpen: boolean, questionId: number, optionIndex: number | null }
   const [cropperState, setCropperState] = useState({ isOpen: false, questionId: null, optionIndex: null });
 
-  useEffect(() => {
-    if (timeLeft <= 0 && calculateTimeLeft() <= 0) { handleSubmit(true); return; }
-    const timer = setInterval(() => {
-      const remaining = calculateTimeLeft();
-      setTimeLeft(remaining);
-      if (remaining <= 0) clearInterval(timer);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [endTime, pauseStartTime, calculateTimeLeft, handleSubmit, timeLeft]);
 
   useEffect(() => {
     localStorage.setItem("cbt_session", JSON.stringify({
@@ -86,6 +77,16 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
     });
     onSubmit(results);
   }, [answers, questions, showConfirm, onSubmit]);
+
+  useEffect(() => {
+    if (timeLeft <= 0 && calculateTimeLeft() <= 0) { handleSubmit(true); return; }
+    const timer = setInterval(() => {
+      const remaining = calculateTimeLeft();
+      setTimeLeft(remaining);
+      if (remaining <= 0) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [endTime, pauseStartTime, calculateTimeLeft, handleSubmit, timeLeft]);
 
   const goTo = (idx) => setCurrentIndex(Math.max(0, Math.min(questions.length - 1, idx)));
 
