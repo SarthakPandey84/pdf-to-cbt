@@ -32,8 +32,9 @@ Built for JEE, NEET, UPSC, GRE, and any structured question paper format. Powere
 
 **Processing Strategy:**
 - **Concurrent Vision**: Renders PDF pages to images and parses them concurrently using Groq's high-speed API (with smart rate-limit retry logic).
+- **Asynchronous Processing**: Uses background tasks and long-polling to prevent proxy timeouts on massive files. The UI shows real-time extraction progress (e.g., "Parsed 5/20 pages...").
 - **Perfect Mapping**: LLM returns exact page numbers for each question, allowing 100% accurate diagram assignment without text-search heuristics.
-- **Blazing Fast**: Replaced slow local OCR (Tesseract) with cloud-native multimodal processing.
+- **Blazing Fast**: Cloud-native multimodal processing that effortlessly handles PDFs up to **25MB**.
 
 ### 🖼 Diagram Extraction & Assignment
 - **Built-in Smart Cropper**: If a diagram is missed by the AI, you don't need to take screenshots. The frontend receives the full original PDF pages and lets you crop diagrams directly in the browser!
@@ -190,25 +191,33 @@ Open **http://localhost:3000**
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/parse-pdf` | Upload PDF → returns parsed questions, duration, subjects |
+| `POST` | `/api/upload` | Upload PDF (up to 25MB) → returns `task_id` for background processing |
+| `GET` | `/api/status/{task_id}` | Poll task status → returns live progress or final parsed exam data |
 | `POST` | `/api/parse-answer-key` | Upload answer key PDF → returns mapped answers |
 | `PATCH` | `/api/questions/answer-key` | Apply answer key to current question set |
 
-**`POST /api/parse-pdf` Response shape:**
+**Final `GET /api/status/{task_id}` Response shape:**
 ```json
 {
-  "questions": [
-    {
-      "id": 1,
-      "subject": "Physics",
-      "question": "A particle moves with...",
-      "options": ["A. 2 m/s", "B. 4 m/s", "C. 6 m/s", "D. 8 m/s"],
-      "correct_answer": "B",
-      "image": "<base64_string_or_null>"
-    }
-  ],
-  "duration_minutes": 180,
-  "total_questions": 60
+  "status": "completed",
+  "result": {
+    "questions": [
+      {
+        "id": 1,
+        "subject": "Physics",
+        "question_text": "A particle moves with...",
+        "options": [
+          {"label": "A", "text": "2 m/s"},
+          {"label": "B", "text": "4 m/s"}
+        ],
+        "correct_answer_index": 1,
+        "has_image": false
+      }
+    ],
+    "duration_minutes": 180,
+    "total": 60,
+    "warnings": []
+  }
 }
 ```
 
