@@ -3,12 +3,13 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import Timer from "./Timer";
 import QuestionPalette from "./QuestionPalette";
 import MathText from "./MathText";
+import ImageCropperModal from "./ImageCropperModal";
 
 const MARKS_CORRECT = 4;
 const MARKS_WRONG = -1;
 const MARKS_SKIPPED = 0;
 
-export default function CBTInterface({ questions: initialQuestions, durationMinutes = 180, onSubmit }) {
+export default function CBTInterface({ questions: initialQuestions, durationMinutes = 180, pageImages = {}, onSubmit }) {
   const [questions, setQuestions] = useState(initialQuestions);
 
   const loadState = () => {
@@ -33,8 +34,9 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
   const [timeLeft, setTimeLeft] = useState(calculateTimeLeft());
   
   const [showConfirm, setShowConfirm] = useState(false);
-  const fileInputRef = useRef(null);
-  const [uploadingFor, setUploadingFor] = useState(null);
+  
+  // { isOpen: boolean, questionId: number, optionIndex: number | null }
+  const [cropperState, setCropperState] = useState({ isOpen: false, questionId: null, optionIndex: null });
 
   useEffect(() => {
     if (timeLeft <= 0 && calculateTimeLeft() <= 0) { handleSubmit(true); return; }
@@ -80,36 +82,34 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
 
   const goTo = (idx) => setCurrentIndex(Math.max(0, Math.min(questions.length - 1, idx)));
 
-  const handleDiagramUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file || uploadingFor === null) return;
-    const form = new FormData();
-    form.append("file", file);
-    try {
-      const res = await fetch(`/api/question/${uploadingFor}/image`, {
-        method: "POST",
-        body: form,
-      });
-      if (!res.ok) throw new Error("Upload failed");
-      const data = await res.json();
-      setQuestions(prev =>
-        prev.map(q =>
-          q.id === uploadingFor
-            ? { ...q, diagram_base64: data.diagram_base64, diagram_mime: data.diagram_mime, has_image: true }
-            : q
-        )
-      );
-    } catch (err) {
-      console.error("Diagram upload error:", err);
-    } finally {
-      setUploadingFor(null);
-      e.target.value = "";
-    }
+  const handleCropComplete = (base64Data, mimeType) => {
+    const { questionId, optionIndex } = cropperState;
+    if (!questionId) return;
+
+    setQuestions(prev => prev.map(q => {
+      if (q.id === questionId) {
+        if (optionIndex !== null) {
+          // Update option diagram
+          const newOptions = [...q.options];
+          newOptions[optionIndex] = { 
+            ...newOptions[optionIndex], 
+            diagram_base64: base64Data, 
+            diagram_mime: mimeType 
+          };
+          return { ...q, options: newOptions };
+        } else {
+          // Update question diagram
+          return { ...q, diagram_base64: base64Data, diagram_mime: mimeType, has_image: true };
+        }
+      }
+      return q;
+    }));
+    
+    setCropperState({ isOpen: false, questionId: null, optionIndex: null });
   };
 
-  const triggerDiagramUpload = (questionId) => {
-    setUploadingFor(questionId);
-    fileInputRef.current?.click();
+  const triggerDiagramCrop = (questionId, optionIndex = null) => {
+    setCropperState({ isOpen: true, questionId, optionIndex });
   };
 
   const selectedOption = answers[currentIndex] ?? null;
@@ -117,13 +117,13 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
 
   return (
     <div className="min-h-screen bg-slate-950 p-4">
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp"
-        className="hidden"
-        onChange={handleDiagramUpload}
-      />
+      {cropperState.isOpen && (
+        <ImageCropperModal
+          base64Image={pageImages[currentQuestion.page_number]}
+          onClose={() => setCropperState({ isOpen: false, questionId: null, optionIndex: null })}
+          onCropComplete={handleCropComplete}
+        />
+      )}
 
       {showConfirm && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
@@ -211,7 +211,7 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
                 </div>
                 <div className="flex justify-center">
                   <button
-                    onClick={() => triggerDiagramUpload(currentQuestion.id)}
+                    onClick={() => triggerDiagramCrop(currentQuestion.id)}
                     className="text-xs text-slate-500 hover:text-slate-300 underline transition-colors"
                   >
                     Replace diagram
@@ -222,7 +222,7 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
               <div className="mb-6 flex flex-col items-center gap-2 border border-dashed border-slate-700 rounded-xl py-6">
                 <span className="text-slate-500 text-sm">No diagram extracted for this question</span>
                 <button
-                  onClick={() => triggerDiagramUpload(currentQuestion.id)}
+                  onClick={() => triggerDiagramCrop(currentQuestion.id)}
                   className="px-4 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-slate-300 text-xs hover:bg-slate-700 transition-colors"
                 >
                   + Add diagram manually
@@ -248,13 +248,41 @@ export default function CBTInterface({ questions: initialQuestions, durationMinu
                       ${isSelected ? "bg-amber-400 text-slate-900" : "bg-slate-700 text-slate-400"}`}>
                       {opt.label}
                     </span>
-                    {isIllegible ? (
-                      <span className="text-sm text-slate-500 italic">
-                        [Structure/diagram — see question paper]
-                      </span>
-                    ) : (
-                      <MathText text={opt.text} hasMath={currentQuestion.has_math} className="text-sm leading-relaxed" />
-                    )}
+                    <div className="flex-1">
+                      {isIllegible ? (
+                        <div className="flex flex-col gap-2 items-start">
+                          <span className="text-sm text-slate-500 italic">
+                            [Structure/diagram — see question paper]
+                          </span>
+                          {!opt.diagram_base64 && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); triggerDiagramCrop(currentQuestion.id, i); }}
+                              className="px-3 py-1 rounded-lg bg-slate-800 border border-slate-600 text-slate-300 text-xs hover:bg-slate-700 transition-colors"
+                            >
+                              + Crop diagram for option
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <MathText text={opt.text} hasMath={currentQuestion.has_math} className="text-sm leading-relaxed" />
+                      )}
+                      
+                      {opt.diagram_base64 && (
+                        <div className="mt-3">
+                          <img
+                            src={`data:${opt.diagram_mime || "image/png"};base64,${opt.diagram_base64}`}
+                            alt={`Option ${opt.label}`}
+                            className="max-h-32 max-w-full rounded-lg border border-slate-700 object-contain bg-white/5"
+                          />
+                          <button
+                            onClick={(e) => { e.stopPropagation(); triggerDiagramCrop(currentQuestion.id, i); }}
+                            className="text-xs text-slate-500 hover:text-slate-300 underline transition-colors mt-2 block"
+                          >
+                            Replace diagram
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     {isSelected && <span className="ml-auto text-amber-400 text-lg">✓</span>}
                   </button>
                 );

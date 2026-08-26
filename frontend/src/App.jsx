@@ -11,6 +11,7 @@ export default function App() {
   const [questions, setQuestions] = useState([]);
   const [results, setResults] = useState([]);
   const [warnings, setWarnings] = useState([]);
+  const [pageImages, setPageImages] = useState({});
   const [durationMinutes, setDurationMinutes] = useState(180);
   const [error, setError] = useState(null);
 
@@ -19,6 +20,7 @@ export default function App() {
   const handleUploadSuccess = (data) => {
     setQuestions(data.questions);
     setWarnings(data.warnings || []);
+    setPageImages(data.page_images || {});
     setDurationMinutes(data.duration_minutes || 180);
     setError(null);
     setPhase("test");
@@ -36,6 +38,7 @@ export default function App() {
     setQuestions([]);
     setResults([]);
     setWarnings([]);
+    setPageImages({});
     setError(null);
   };
 
@@ -70,6 +73,7 @@ export default function App() {
         <CBTInterface
           questions={questions}
           durationMinutes={durationMinutes}
+          pageImages={pageImages}
           onSubmit={handleSubmit}
         />
       )}

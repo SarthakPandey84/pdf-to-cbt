@@ -3,7 +3,5 @@ uvicorn
 pdfplumber
 python-multipart
 groq
-pytesseract
-pdf2image
 pillow
 python-dotenv

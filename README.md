@@ -2,11 +2,11 @@
 
 > Transform any competitive exam PDF into a fully interactive, timed Computer-Based Test — in seconds.
 
-Built for JEE, NEET, UPSC, GRE, and any structured question paper format. Powered by **FastAPI**, **React + Vite**, **Groq LLaMA 3.3 70B**, and a custom multi-layer PDF extraction engine with OCR fallback.
+Built for JEE, NEET, UPSC, GRE, and any structured question paper format. Powered by **FastAPI**, **React + Vite**, **Groq LLaMA 3.2 Vision**, and a highly optimized native multimodal PDF extraction engine.
 
 ![Stack](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi)
 ![Stack](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB?style=flat-square&logo=react)
-![Stack](https://img.shields.io/badge/LLM-Groq%20LLaMA%203.3%2070B-orange?style=flat-square)
+![Stack](https://img.shields.io/badge/LLM-Groq%20LLaMA%203.2%20Vision-orange?style=flat-square)
 ![Stack](https://img.shields.io/badge/Containerized-Docker-2496ED?style=flat-square&logo=docker)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
@@ -23,19 +23,17 @@ Built for JEE, NEET, UPSC, GRE, and any structured question paper format. Powere
 
 ## ✨ Feature Highlights
 
-### 🛠 Multi-Layer PDF Extraction Engine
+### 🛠 Native Multimodal PDF Extraction Engine
 
 | Layer | Technology | Trigger |
 |---|---|---|
-| Primary | `pdfplumber` vector text extraction | Always attempted first |
-| Fallback | `pytesseract` OCR via `pdf2image` @ 300 DPI | Low text density or scanned PDFs |
+| Primary | `llama-3.2-90b-vision-preview` | Processes entire PDF pages visually |
+| Diagram Cropping | `pdfplumber` bounding boxes | Extracts physical images |
 
-**Chunking & Processing Strategy:**
-- `CHUNK_SIZE = 3500` tokens, `CHUNK_OVERLAP = 400`, `MAX_TEXT = 100,000` chars
-- **Parallel Processing**: Uses Python's `ThreadPoolExecutor` to run LLM API calls and OCR image processing concurrently, reducing extraction time by up to 80%.
-- Boundary-aware regex sliding window prevents mid-question splits
-- Failed chunks auto-bisect and retry independently
-- Subject headers propagate across all chunks to maintain context
+**Processing Strategy:**
+- **Concurrent Vision**: Renders PDF pages to images and parses them concurrently using Groq's high-speed API.
+- **Perfect Mapping**: LLM returns exact page numbers for each question, allowing 100% accurate diagram assignment without text-search heuristics.
+- **Blazing Fast**: Replaced slow local OCR (Tesseract) with cloud-native multimodal processing.
 
 ### 🖼 Diagram Extraction & Assignment
 - Extracts per-image bounding boxes (`x0`, `top`, `x1`, `bottom`) from PDF object tables
@@ -69,9 +67,9 @@ Built for JEE, NEET, UPSC, GRE, and any structured question paper format. Powere
 pdf-to-cbt/
 │
 ├── backend/
-│   ├── main.py                  # FastAPI app — extraction, OCR, chunking, Groq integration
+│   ├── main.py                  # FastAPI app — Gemini integration, extraction
 │   ├── requirements.txt         # Python dependencies
-│   └── Dockerfile               # Python 3.11-slim + Tesseract + Poppler
+│   └── Dockerfile               # Python 3.11-slim + Poppler
 │
 ├── frontend/
 │   ├── src/
@@ -104,7 +102,7 @@ pdf-to-cbt/
 Create a `.env` file in the **project root**:
 
 ```env
-GROQ_API_KEY=gsk_your_key_here
+GEMINI_API_KEY=your_gemini_api_key_here
 POPPLER_PATH=C:\Program Files\poppler\Library\bin
 ```
 
@@ -151,11 +149,6 @@ docker compose up --build
 
 Install and verify these are accessible from your terminal PATH:
 
-**Tesseract OCR v5+**
-- Windows: [UB Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki)
-- Linux: `sudo apt install tesseract-ocr`
-- Mac: `brew install tesseract`
-
 **Poppler**
 - Windows: [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows/releases/) → extract and add `bin/` to PATH
 - Linux: `sudo apt install poppler-utils`
@@ -163,7 +156,6 @@ Install and verify these are accessible from your terminal PATH:
 
 Verify installation:
 ```bash
-tesseract --version
 pdftoppm -v
 ```
 
@@ -227,10 +219,9 @@ Open **http://localhost:3000**
 
 | Category | Technology |
 |---|---|
-| **LLM** | Groq `llama-3.3-70b-versatile` · `temperature=0.1` · `max_tokens=4096` |
-| **Backend** | Python 3.11 · FastAPI · Uvicorn · `concurrent.futures` |
-| **PDF Extraction** | pdfplumber · pdf2image · Pillow |
-| **OCR** | Tesseract v5.5 · pytesseract · Poppler |
+| **LLM** | Groq `llama-3.2-90b-vision-preview` |
+| **Backend** | Python 3.11 · FastAPI · Uvicorn |
+| **PDF Extraction** | pdfplumber · groq |
 | **Frontend** | React 18 · Vite 5 · Tailwind CSS v3 |
 | **Math Rendering** | KaTeX |
 | **Containerization** | Docker · Nginx Alpine |
@@ -270,8 +261,8 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 ## 🙏 Acknowledgements
 
-- [Groq](https://groq.com) for blazing-fast LLM inference
-- [pdfplumber](https://github.com/jsvine/pdfplumber) for reliable PDF text extraction
+- [Google AI](https://aistudio.google.com/) for incredibly fast, native multimodal LLMs
+- [pdfplumber](https://github.com/jsvine/pdfplumber) for reliable PDF diagram extraction
 - [KaTeX](https://katex.org) for fast client-side math rendering
 - [Tailwind CSS](https://tailwindcss.com) for the UI foundation
 
