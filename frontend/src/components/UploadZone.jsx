@@ -31,6 +31,7 @@ export default function UploadZone({ onUploadSuccess, onUploadError }) {
       }
 
       const { task_id } = await res.json();
+      setProgress("Starting AI processing...");
       
       // Polling loop
       const pollInterval = setInterval(async () => {

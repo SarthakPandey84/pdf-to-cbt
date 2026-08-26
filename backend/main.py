@@ -9,8 +9,9 @@ import time
 import base64
 import tempfile
 import uuid
+import asyncio
 from io import BytesIO
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -311,7 +312,7 @@ def process_pdf_task(task_id: str, contents: bytes):
 
 
 @app.post("/api/upload")
-async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files accepted.")
 
@@ -322,7 +323,9 @@ async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(
     task_id = str(uuid.uuid4())
     tasks[task_id] = {"status": "processing", "progress": "Starting..."}
     
-    background_tasks.add_task(process_pdf_task, task_id, contents)
+    # Run in a separate thread so it doesn't block the event loop and allows the response to return instantly
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, process_pdf_task, task_id, contents)
     
     return {"task_id": task_id}
 
