@@ -2,11 +2,11 @@
 
 > Transform any competitive exam PDF into a fully interactive, timed Computer-Based Test — in seconds.
 
-Built for JEE, NEET, UPSC, GRE, and any structured question paper format. Powered by **FastAPI**, **React + Vite**, **Groq LLaMA 3.2 Vision**, and a highly optimized native multimodal PDF extraction engine.
+Built for JEE, NEET, UPSC, GRE, and any structured question paper format. Powered by **FastAPI**, **React + Vite**, **Groq Qwen Vision**, and a highly optimized native multimodal PDF extraction engine.
 
 ![Stack](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi)
 ![Stack](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB?style=flat-square&logo=react)
-![Stack](https://img.shields.io/badge/LLM-Groq%20LLaMA%203.2%20Vision-orange?style=flat-square)
+![Stack](https://img.shields.io/badge/LLM-Groq%20Qwen%20Vision-orange?style=flat-square)
 ![Stack](https://img.shields.io/badge/Containerized-Docker-2496ED?style=flat-square&logo=docker)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
@@ -27,19 +27,18 @@ Built for JEE, NEET, UPSC, GRE, and any structured question paper format. Powere
 
 | Layer | Technology | Trigger |
 |---|---|---|
-| Primary | `llama-3.2-90b-vision-preview` | Processes entire PDF pages visually |
-| Diagram Cropping | `pdfplumber` bounding boxes | Extracts physical images |
+| Primary | `qwen-vision` (via Groq) | Processes entire PDF pages visually |
+| Diagram Cropping | Built-in UI Cropper | Manual or automated diagram assignment |
 
 **Processing Strategy:**
-- **Concurrent Vision**: Renders PDF pages to images and parses them concurrently using Groq's high-speed API.
+- **Concurrent Vision**: Renders PDF pages to images and parses them concurrently using Groq's high-speed API (with smart rate-limit retry logic).
 - **Perfect Mapping**: LLM returns exact page numbers for each question, allowing 100% accurate diagram assignment without text-search heuristics.
 - **Blazing Fast**: Replaced slow local OCR (Tesseract) with cloud-native multimodal processing.
 
 ### 🖼 Diagram Extraction & Assignment
-- Extracts per-image bounding boxes (`x0`, `top`, `x1`, `bottom`) from PDF object tables
-- Skips decorative elements and lines under 50px
-- Heuristic page-mapping engine assigns one diagram per question
-- Diagrams returned as base64 — no temp file storage needed
+- **Built-in Smart Cropper**: If a diagram is missed by the AI, you don't need to take screenshots. The frontend receives the full original PDF pages and lets you crop diagrams directly in the browser!
+- **Option-Level Diagrams**: Full support for diagram-based options (e.g. chemical structures). Easily crop and assign structures directly to Options A, B, C, or D.
+- Diagrams are stored as base64 — no temp file storage needed.
 
 ### ⏱ Smart Duration Detection
 - Scans PDF headers with regex for patterns like `3 Hours`, `180 Mins`, `Duration: 3:00`
@@ -219,7 +218,7 @@ Open **http://localhost:3000**
 
 | Category | Technology |
 |---|---|
-| **LLM** | Groq `llama-3.2-90b-vision-preview` |
+| **LLM** | Groq `Qwen Vision` |
 | **Backend** | Python 3.11 · FastAPI · Uvicorn |
 | **PDF Extraction** | pdfplumber · groq |
 | **Frontend** | React 18 · Vite 5 · Tailwind CSS v3 |
