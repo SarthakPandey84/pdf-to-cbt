@@ -26,8 +26,14 @@ export default function UploadZone({ onUploadSuccess, onUploadError }) {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || "Upload failed");
+        let errMsg = "Upload failed. If the backend is asleep, please try again in a minute.";
+        try {
+          const err = await res.json();
+          errMsg = err.detail || errMsg;
+        } catch (e) {
+          errMsg = `Server error (${res.status}). The backend might be offline or waking up.`;
+        }
+        throw new Error(errMsg);
       }
 
       const { task_id } = await res.json();
