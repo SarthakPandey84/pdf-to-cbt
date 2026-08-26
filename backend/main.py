@@ -8,8 +8,9 @@ import os
 import time
 import base64
 import tempfile
+import uuid
 from io import BytesIO
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -238,11 +239,79 @@ def process_page_with_groq(page_num: int, base64_image: str) -> list[dict]:
                 return []
 
 # ─────────────────────────────────────────────
-# ROUTES
+# ROUTES & BACKGROUND TASKS
 # ─────────────────────────────────────────────
 
-@app.post("/api/upload", response_model=ParseResponse)
-async def upload_pdf(file: UploadFile = File(...)):
+tasks = {}
+
+def process_pdf_task(task_id: str, contents: bytes):
+    try:
+        tasks[task_id]["progress"] = "Extracting images from PDF..."
+        pdf_data = extract_pdf_data(contents)
+        
+        if not groq_client:
+            tasks[task_id]["status"] = "completed"
+            tasks[task_id]["result"] = ParseResponse(questions=[], total=0, warnings=["No GROQ_API_KEY set"], duration_minutes=180, page_images={}).dict()
+            return
+
+        total_pages = len(pdf_data['pages'])
+        tasks[task_id]["progress"] = f"Calling AI for {total_pages} pages..."
+        
+        warnings = []
+        all_raw_questions = []
+        pages_processed = 0
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {
+                executor.submit(process_page_with_groq, pnum, b64): pnum
+                for pnum, b64 in pdf_data["pages"].items()
+            }
+            for future in concurrent.futures.as_completed(futures):
+                pages_processed += 1
+                tasks[task_id]["progress"] = f"Parsed {pages_processed}/{total_pages} pages..."
+                
+                page_questions = future.result()
+                if page_questions:
+                    all_raw_questions.extend(page_questions)
+                else:
+                    warnings.append(f"Failed to parse questions on page {futures[future]}")
+
+        if not all_raw_questions:
+            tasks[task_id]["status"] = "error"
+            tasks[task_id]["error"] = "No questions could be parsed from the PDF."
+            return
+
+        tasks[task_id]["progress"] = "Mapping diagrams to questions..."
+        all_raw_questions = map_images_to_questions(all_raw_questions, pdf_data["diagrams"])
+
+        questions = []
+        for i, q in enumerate(all_raw_questions):
+            q["id"] = i + 1 
+            try:
+                questions.append(Question(**q))
+            except Exception:
+                warnings.append(f"Skipped malformed question id={q.get('id', '?')}")
+
+        duration_minutes = min(len(questions) * 3, 180)
+
+        response = ParseResponse(
+            questions=questions,
+            total=len(questions),
+            warnings=warnings,
+            duration_minutes=duration_minutes,
+            page_images=pdf_data["pages"]
+        )
+        
+        tasks[task_id]["status"] = "completed"
+        tasks[task_id]["result"] = response.dict()
+        
+    except Exception as e:
+        tasks[task_id]["status"] = "error"
+        tasks[task_id]["error"] = str(e)
+
+
+@app.post("/api/upload")
+async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files accepted.")
 
@@ -250,55 +319,18 @@ async def upload_pdf(file: UploadFile = File(...)):
     if len(contents) > 25 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large. Max 25MB.")
 
-    warnings = []
+    task_id = str(uuid.uuid4())
+    tasks[task_id] = {"status": "processing", "progress": "Starting..."}
     
-    # 1. Extract page images and diagrams
-    print("Extracting images from PDF...")
-    pdf_data = extract_pdf_data(contents)
+    background_tasks.add_task(process_pdf_task, task_id, contents)
     
-    if not groq_client:
-        return ParseResponse(questions=[], total=0, warnings=["No GROQ_API_KEY set"], duration_minutes=180, page_images={})
+    return {"task_id": task_id}
 
-    # 2. Process pages in parallel
-    print(f"Calling Groq {LLM_MODEL} Vision for {len(pdf_data['pages'])} pages...")
-    all_raw_questions = []
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {
-            executor.submit(process_page_with_groq, pnum, b64): pnum
-            for pnum, b64 in pdf_data["pages"].items()
-        }
-        for future in concurrent.futures.as_completed(futures):
-            page_questions = future.result()
-            if page_questions:
-                all_raw_questions.extend(page_questions)
-            else:
-                warnings.append(f"Failed to parse questions on page {futures[future]}")
-
-    if not all_raw_questions:
-        raise HTTPException(status_code=422, detail="No questions could be parsed from the PDF.")
-
-    # 3. Map images and re-number
-    print("Mapping diagrams...")
-    all_raw_questions = map_images_to_questions(all_raw_questions, pdf_data["diagrams"])
-
-    questions = []
-    for i, q in enumerate(all_raw_questions):
-        q["id"] = i + 1 
-        try:
-            questions.append(Question(**q))
-        except Exception:
-            warnings.append(f"Skipped malformed question id={q.get('id', '?')}")
-
-    duration_minutes = min(len(questions) * 3, 180)
-
-    return ParseResponse(
-        questions=questions,
-        total=len(questions),
-        warnings=warnings,
-        duration_minutes=duration_minutes,
-        page_images=pdf_data["pages"]
-    )
+@app.get("/api/status/{task_id}")
+def get_task_status(task_id: str):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return tasks[task_id]
 
 @app.post("/api/question/{question_id}/image")
 async def upload_question_image(question_id: int, file: UploadFile = File(...)):

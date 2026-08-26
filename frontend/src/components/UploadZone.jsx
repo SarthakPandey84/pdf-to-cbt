@@ -14,13 +14,12 @@ export default function UploadZone({ onUploadSuccess, onUploadError }) {
     }
     setFileName(file.name);
     setIsLoading(true);
-    setProgress("Extracting text from PDF...");
+    setProgress("Uploading PDF...");
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
-      setProgress("Parsing questions with AI...");
       const res = await fetch("/api/upload", {
         method: "POST",
         body: formData,
@@ -31,9 +30,34 @@ export default function UploadZone({ onUploadSuccess, onUploadError }) {
         throw new Error(err.detail || "Upload failed");
       }
 
-      const data = await res.json();
-      setProgress(`Found ${data.total} questions! (${data.duration_minutes} min exam)`);
-      setTimeout(() => onUploadSuccess(data), 800);
+      const { task_id } = await res.json();
+      
+      // Polling loop
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`/api/status/${task_id}`);
+          if (!statusRes.ok) throw new Error("Status check failed");
+          const statusData = await statusRes.json();
+          
+          if (statusData.status === "error") {
+            clearInterval(pollInterval);
+            throw new Error(statusData.error || "Parsing failed");
+          } else if (statusData.status === "completed") {
+            clearInterval(pollInterval);
+            setProgress(`Found ${statusData.result.total} questions! (${statusData.result.duration_minutes} min exam)`);
+            setTimeout(() => onUploadSuccess(statusData.result), 800);
+          } else {
+            setProgress(statusData.progress || "Processing...");
+          }
+        } catch (pollErr) {
+          clearInterval(pollInterval);
+          onUploadError(pollErr.message);
+          setIsLoading(false);
+          setFileName(null);
+          setProgress("");
+        }
+      }, 3000);
+
     } catch (e) {
       onUploadError(e.message);
       setIsLoading(false);
