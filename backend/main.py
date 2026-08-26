@@ -11,6 +11,7 @@ import tempfile
 import uuid
 import asyncio
 from io import BytesIO
+from PIL import Image
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -66,6 +67,7 @@ class Question(BaseModel):
     has_math: bool = False
     has_image: bool = False
     page_number: int = 1
+    diagram_bbox: Optional[List[float]] = None
     diagram_base64: Optional[str] = None
     diagram_mime: Optional[str] = None
 
@@ -82,82 +84,37 @@ class ParseResponse(BaseModel):
 
 def extract_pdf_data(file_bytes: bytes) -> dict:
     """
-    Returns dict with page images and extracted diagrams.
+    Returns dict with page images.
     {
-      "pages": {page_num: base64_full_page},
-      "diagrams": {page_num: [(b64, mime), ...]}
+      "pages": {page_num: base64_full_page}
     }
     """
-    data = {"pages": {}, "diagrams": {}}
+    data = {"pages": {}}
 
     with pdfplumber.open(BytesIO(file_bytes)) as pdf:
         for i, page in enumerate(pdf.pages):
             page_num = i + 1
-            
-            # Extract full page image for Groq Vision
             page_img = page.to_image(resolution=100)
             buf = BytesIO()
             page_img.original.save(buf, format="PNG")
             data["pages"][page_num] = base64.b64encode(buf.getvalue()).decode("utf-8")
-            
-            # Extract embedded diagrams
-            if page.images:
-                page_imgs = []
-                for img_meta in page.images:
-                    try:
-                        x0  = max(0, img_meta["x0"] - 2)
-                        top = max(0, img_meta["top"] - 2)
-                        x1  = min(page.width,  img_meta["x1"] + 2)
-                        bot = min(page.height, img_meta["bottom"] + 2)
-
-                        if (x1 - x0) < 50 or (bot - top) < 50:
-                            continue
-
-                        cropped = page.within_bbox((x0, top, x1, bot)).to_image(resolution=150)
-                        buf_crop = BytesIO()
-                        cropped.original.save(buf_crop, format="PNG")
-                        b64 = base64.b64encode(buf_crop.getvalue()).decode("utf-8")
-                        page_imgs.append((b64, "image/png"))
-                    except Exception as e:
-                        pass
-                if page_imgs:
-                    data["diagrams"][page_num] = page_imgs
 
     return data
 
-
-def map_images_to_questions(
-    questions: list[dict],
-    page_diagrams: dict[int, list[tuple[str, str]]]
-) -> list[dict]:
-    assigned: set[tuple[int,int]] = set()
-
-    for q in questions:
-        if not q.get("has_image"):
-            continue
-            
-        pnum = q.get("page_number", 1)
-        matched = None
-        
-        if pnum in page_diagrams:
-            for img_idx, (b64, mime) in enumerate(page_diagrams[pnum]):
-                if (pnum, img_idx) not in assigned:
-                    matched = (pnum, img_idx, b64, mime)
-                    break
-                    
-        if not matched:
-            all_images = [(p, i, b, m) for p, imgs in page_diagrams.items() for i, (b, m) in enumerate(imgs)]
-            candidates = [x for x in all_images if (x[0], x[1]) not in assigned]
-            if candidates:
-                matched = min(candidates, key=lambda x: abs(x[0] - pnum))
-
-        if matched:
-            p, img_idx, b64, mime = matched
-            assigned.add((p, img_idx))
-            q["diagram_base64"] = b64
-            q["diagram_mime"]   = mime
-
-    return questions
+def crop_image_from_bbox(base64_img: str, bbox: list[float]) -> tuple[str, str]:
+    try:
+        y1, x1, y2, x2 = bbox
+        img = Image.open(BytesIO(base64.b64decode(base64_img)))
+        w, h = img.size
+        # Bbox is in percentages, convert to pixels
+        crop_box = (x1 * w / 100, y1 * h / 100, x2 * w / 100, y2 * h / 100)
+        cropped = img.crop(crop_box)
+        buf = BytesIO()
+        cropped.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode("utf-8"), "image/png"
+    except Exception as e:
+        print(f"Error cropping image: {e}")
+        return None, None
 
 # ─────────────────────────────────────────────
 # PROMPTS
@@ -177,6 +134,7 @@ CRITICAL RULES:
 7. correct_answer_index: set to -1 if unknown. Do NOT guess.
 8. has_math: true if question or options contain equations, formulas, superscripts, or scientific notation. Format ALL math with KaTeX delimiters ($...$ for inline, $$...$$ for block).
 9. has_image: true if question references a figure, diagram, graph, or image.
+10. diagram_bbox: If has_image is true, provide the bounding box of the diagram on the page as an array of 4 percentages [y1, x1, y2, x2]. For example, [10.5, 20.0, 30.5, 80.0]. If no diagram is present, use null.
 
 JSON schema:
 {
@@ -192,7 +150,8 @@ JSON schema:
       ],
       "correct_answer_index": <0-based int or -1>,
       "has_math": <bool>,
-      "has_image": <bool>
+      "has_image": <bool>,
+      "diagram_bbox": [<y1>, <x1>, <y2>, <x2>]
     }
   ]
 }"""
@@ -256,34 +215,36 @@ def process_pdf_task(task_id: str, contents: bytes):
             return
 
         total_pages = len(pdf_data['pages'])
-        tasks[task_id]["progress"] = f"Calling AI for {total_pages} pages..."
+        tasks[task_id]["progress"] = f"Calling AI sequentially for {total_pages} pages..."
         
         warnings = []
         all_raw_questions = []
         pages_processed = 0
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {
-                executor.submit(process_page_with_groq, pnum, b64): pnum
-                for pnum, b64 in pdf_data["pages"].items()
-            }
-            for future in concurrent.futures.as_completed(futures):
-                pages_processed += 1
-                tasks[task_id]["progress"] = f"Parsed {pages_processed}/{total_pages} pages..."
-                
-                page_questions = future.result()
-                if page_questions:
-                    all_raw_questions.extend(page_questions)
-                else:
-                    warnings.append(f"Failed to parse questions on page {futures[future]}")
+        for pnum, b64 in pdf_data["pages"].items():
+            tasks[task_id]["progress"] = f"Parsing page {pnum} of {total_pages}..."
+            page_questions = process_page_with_groq(pnum, b64)
+            if page_questions:
+                all_raw_questions.extend(page_questions)
+            else:
+                warnings.append(f"Failed to parse questions on page {pnum}")
+            
+            pages_processed += 1
 
         if not all_raw_questions:
             tasks[task_id]["status"] = "error"
             tasks[task_id]["error"] = "No questions could be parsed from the PDF."
             return
 
-        tasks[task_id]["progress"] = "Mapping diagrams to questions..."
-        all_raw_questions = map_images_to_questions(all_raw_questions, pdf_data["diagrams"])
+        tasks[task_id]["progress"] = "Auto-cropping diagrams..."
+        for q in all_raw_questions:
+            if q.get("has_image") and q.get("diagram_bbox"):
+                pnum = q.get("page_number")
+                if pnum in pdf_data["pages"]:
+                    b64_crop, mime = crop_image_from_bbox(pdf_data["pages"][pnum], q["diagram_bbox"])
+                    if b64_crop:
+                        q["diagram_base64"] = b64_crop
+                        q["diagram_mime"] = mime
 
         questions = []
         for i, q in enumerate(all_raw_questions):
