@@ -90,7 +90,7 @@ export default function UploadZone({ onUploadSuccess, onUploadError }) {
               <div className="w-20 h-20 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-4xl">📄</div>
               <div>
                 <p className="text-white text-xl font-bold mb-1">{isDragging ? "Release to upload" : "Drag & drop your PDF here"}</p>
-                <p className="text-slate-500 text-sm">or click to browse — max 20MB</p>
+                <p className="text-slate-500 text-sm">or click to browse — max 25MB</p>
               </div>
               <div className="flex gap-2 mt-2">
                 {["JEE", "NEET", "UPSC", "GRE", "Custom"].map(tag => (

@@ -247,8 +247,8 @@ async def upload_pdf(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Only PDF files accepted.")
 
     contents = await file.read()
-    if len(contents) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File too large. Max 20MB.")
+    if len(contents) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Max 25MB.")
 
     warnings = []
     
